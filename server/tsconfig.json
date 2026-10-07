@@ -3,6 +3,8 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "target": "esnext",
+    "rootDir": ".",
+    "outDir": "./dist",
     "types": ["node"],
     "sourceMap": true,
     "declaration": true,
@@ -13,5 +15,7 @@
     "verbatimModuleSyntax": false,
     "isolatedModules": true,
     "skipLibCheck": true
-  }
+  },
+  "include": ["*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

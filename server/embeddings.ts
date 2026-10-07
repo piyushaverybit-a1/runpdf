@@ -15,7 +15,6 @@ export async function generateEmbedding(text: string) {
     model: openrouter.embedding(process.env.EMBEDDING_MODEL!),
     value: input,
   });
-  console.log(embedding.length);
   return embedding;
 }
 

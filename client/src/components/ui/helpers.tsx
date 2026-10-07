@@ -13,7 +13,7 @@ export const DropdownMenuTrigger = ({ children, render, ...props }: any) => {
   return render ? React.cloneElement(render, props, children) : <div {...props}>{children}</div>;
 };
 export const DropdownMenuContent = ({ className, children, ...props }: any) => (
-  <div className={cn("absolute right-0 z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md", className)} {...props}>
+  <div className={cn("absolute right-0 z-50 mt-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md", className)} {...props}>
     {children}
   </div>
 );
@@ -56,7 +56,7 @@ export const CommandInput = ({ className, ...props }: any) => (
   <input className={cn("flex h-9 w-full rounded-md bg-transparent px-3 py-1 text-sm outline-hidden placeholder:text-muted-foreground", className)} {...props} />
 );
 export const CommandList = ({ className, children, ...props }: any) => (
-  <div className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)} {...props}>{children}</div>
+  <div className={cn(" overflow-y-auto overflow-x-hidden", className)} {...props}>{children}</div>
 );
 export const CommandEmpty = ({ className, children, ...props }: any) => (
   <div className={cn("py-6 text-center text-sm", className)} {...props}>{children}</div>

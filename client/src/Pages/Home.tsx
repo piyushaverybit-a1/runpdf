@@ -144,7 +144,7 @@ export default function RAGChatBot() {
         >
           <PromptInputBody className="p-3">
             <PromptInputTextarea
-              className="min-h-[50px] text-sm bg-transparent border-0 shadow-none focus-visible:ring-0 resize-none px-2 py-4 placeholder:text-muted-foreground"
+              className=" text-sm bg-transparent border-0 shadow-none focus-visible:ring-0 resize-none px-2 py-4 placeholder:text-muted-foreground"
               value={input}
               onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
               placeholder="Message Agent AI..."

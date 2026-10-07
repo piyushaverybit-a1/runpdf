@@ -6,7 +6,8 @@ import { chunkContent } from "./chunking.js";
 
 export async function processPdfFile(fileBuffer: Uint8Array | Buffer) {
   try {
-    const { text } = await extractText(fileBuffer);
+    const pdfData = Uint8Array.from(fileBuffer);
+    const { text } = await extractText(pdfData);
     const fullText = Array.isArray(text) ? text.join("\n") : text;
 
     if (!fullText || fullText.trim().length === 0) {

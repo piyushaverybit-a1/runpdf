@@ -1,7 +1,7 @@
-import { useState, Fragment, type ChangeEvent } from "react";
+import { useEffect, useState, Fragment, type ChangeEvent } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { Bot, User, Sparkles, AlertCircle, Square } from "lucide-react";
+import { Bot, User, Sparkles, AlertCircle, Check, Copy, Square } from "lucide-react";
 
 import {
   PromptInput,
@@ -21,18 +21,29 @@ import {
 import {
   Conversation,
   ConversationContent,
-  ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { Button } from "@/components/ui/button";
+import type { UIMessage } from "ai";
 
-export default function RAGChatBot() {
+type HomeProps = {
+  chatId: string;
+  savedMessages: UIMessage[];
+  onMessagesChange: (chatId: string, messages: UIMessage[]) => void;
+};
+
+export default function RAGChatBot({ chatId, savedMessages, onMessagesChange }: HomeProps) {
   const [input, setInput] = useState("");
-
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const { messages, sendMessage, stop, status, error } = useChat({
+    id: chatId,
+    messages: savedMessages,
     transport: new DefaultChatTransport({
       api: "/api/chat",
     }),
   });
+
+  useEffect(() => {
+    onMessagesChange(chatId, messages);
+  }, [chatId, messages, onMessagesChange]);
 
   const isGenerating = status === "submitted" || status === "streaming";
 
@@ -46,10 +57,23 @@ export default function RAGChatBot() {
     setInput("");
   };
 
+  const handleCopy = async (messageId: string, text: string) => {
+  await navigator.clipboard.writeText(text);
+
+  setCopiedMessageId(messageId);
+
+  setTimeout(() => {
+    setCopiedMessageId(null);
+  }, 1500);
+};
+
   return (
     <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)] max-w-4xl w-full mx-auto p-4 sm:p-6">
-      <Conversation className="flex-1 overflow-y-auto mb-4 rounded-xl">
-        <ConversationContent className="space-y-6 max-w-3xl mx-auto px-2">
+      <Conversation className="flex-1 min-h-0 mb-4 rounded-xl">
+        <ConversationContent
+          scrollClassName="conversation-scroll-area max-w-3xl w-full mx-auto"
+          className="space-y-6 w-full px-2"
+        >
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center min-h-[50vh] text-center p-6 space-y-4">
               <div className="h-12 w-12 rounded-2xl bg-[#10a37f]/10 text-[#10a37f] flex items-center justify-center shadow-xs">
@@ -66,12 +90,17 @@ export default function RAGChatBot() {
 
           {messages.map((message) => {
             const isUser = message.role === "user";
+            const hasVisibleText = message.parts.some(
+              (part) => part.type === "text" && part.text.trim().length > 0,
+            );
+
+            if (!isUser && !hasVisibleText) return null;
+
             return (
               <div
                 key={message.id}
-                className={`flex gap-3 sm:gap-4 ${
-                  isUser ? "justify-end" : "justify-start"
-                }`}
+                className={`flex gap-3 sm:gap-4 ${isUser ? "justify-end" : "justify-start"
+                  }`}
               >
                 {!isUser && (
                   <div className="h-8 w-8 rounded-full bg-[#10a37f] text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
@@ -80,9 +109,8 @@ export default function RAGChatBot() {
                 )}
 
                 <div
-                  className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${
-                    isUser ? "items-end" : "items-start"
-                  }`}
+                  className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isUser ? "items-end" : "items-start"
+                    }`}
                 >
                   <div>
                     {message.parts.map((part, index) => {
@@ -95,6 +123,25 @@ export default function RAGChatBot() {
                                   <MessageResponse className="text-sm leading-relaxed">
                                     {part.text}
                                   </MessageResponse>
+                                  {!isUser && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopy(message.id, part.text)}
+                                      className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                      {copiedMessageId === message.id ? (
+                                        <>
+                                          <Check className="h-3.5 w-3.5" />
+                                          Copied
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Copy className="h-3.5 w-3.5" />
+                                          Copy
+                                        </>
+                                      )}
+                                    </button>
+                                  )}
                                 </MessageContent>
                               </Message>
                             </Fragment>
@@ -133,52 +180,42 @@ export default function RAGChatBot() {
             </div>
           )}
         </ConversationContent>
-
-        <ConversationScrollButton />
       </Conversation>
 
       <div className="max-w-3xl w-full mx-auto relative">
         <PromptInput
-          className="relative bg-secondary/80 rounded-2xl border border-border/70 shadow-sm focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-foreground/20"
+          className="chat-prompt-form"
           onSubmit={handleSubmit}
         >
-          <PromptInputBody className="p-3">
+          <PromptInputBody className="chat-prompt-body">
             <PromptInputTextarea
-              className=" text-sm bg-transparent border-0 shadow-none focus-visible:ring-0 resize-none px-2 py-4 placeholder:text-muted-foreground"
+              className="chat-prompt-textarea"
               value={input}
               onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
               placeholder="Message Agent AI..."
             />
 
-            <div className="flex items-center justify-between">
+            <div className="chat-prompt-controls">
               <PromptInputTools />
 
-              <div className="flex items-center gap-2">
-                {isGenerating && (
-                  <Button
+              <div className="chat-prompt-actions">
+                {isGenerating ? (
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="xs"
                     onClick={stop}
-                    aria-label="Stop generating"
-                    title="Stop generating"
-                    className="text-destructive rounded-full border border-destructive/20"
+                    className="chat-stop-button"
                   >
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                  </Button>
+                    <Square className="h-3 w-3 fill-current" />
+                  </button>
+                ) : (
+                  <PromptInputSubmit
+                    status={status}
+                    className={`rounded-full transition-all duration-150 ${input.trim()
+                        ? "bg-foreground text-background hover:opacity-90"
+                        : "bg-muted text-muted-foreground hover:bg-muted"
+                      }`}
+                  />
                 )}
-
-                <PromptInputSubmit
-                  status={status}
-                  onStop={stop}
-                  className={`rounded-full transition-all duration-150 ${
-                    isGenerating
-                      ? "bg-destructive text-white hover:bg-destructive/90"
-                      : input.trim()
-                      ? "bg-foreground text-background hover:opacity-90"
-                      : "bg-muted text-muted-foreground hover:bg-muted"
-                  }`}
-                />
               </div>
             </div>
           </PromptInputBody>

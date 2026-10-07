@@ -24,6 +24,8 @@ import {
 } from "@/components/ai-elements/conversation";
 import type { UIMessage } from "ai";
 
+import { apiUrl } from "@/config";
+
 type HomeProps = {
   chatId: string;
   savedMessages: UIMessage[];
@@ -37,7 +39,7 @@ export default function RAGChatBot({ chatId, savedMessages, onMessagesChange }: 
     id: chatId,
     messages: savedMessages,
     transport: new DefaultChatTransport({
-      api: "/api/chat",
+      api: apiUrl("/api/chat"),
     }),
   });
 

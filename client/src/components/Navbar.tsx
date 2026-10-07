@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { MessageSquare, UploadCloud, Bot, Loader2 } from "lucide-react";
+import { apiUrl } from "@/config";
 
 export function Navbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -22,7 +23,7 @@ export function Navbar() {
       const formData = new FormData();
       formData.append("pdf", file);
 
-      const res = await fetch("/api/process-pdf", {
+      const res = await fetch(apiUrl("/api/process-pdf"), {
         method: "POST",
         body: formData,
       });

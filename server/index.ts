@@ -22,6 +22,8 @@ import { processPdfFile } from "./process-pdf.js";
 const app = express();
 const PORT = process.env.PORT || 3001;
 const upload = multer({ storage: multer.memoryStorage() });
+let chatRequestCount = 0;
+const temperature =0
 
 app.use(cors());
 app.use(express.json());
@@ -58,6 +60,12 @@ const tools = {
       try {
         const results = await searchDocuments(query);
 
+        console.info("[RAG] Retrieval", JSON.stringify({
+          query,
+          resultCount: results.length,
+          results: results.map(({ id, similarity }: any) => ({ id, similarity })),
+        }));
+
         if (results.length === 0) {
           return "No relevant information found in the knowledge base.";
         }
@@ -84,8 +92,24 @@ tool and answer based on its results. Keep the answer concise.
 `;
 
 app.post("/api/chat", async (req: Request, res: Response) => {
+  const requestNumber = ++chatRequestCount;
+  const requestId = `${Date.now()}-${requestNumber}`;
   try {
     const { messages }: { messages: UIMessage[] } = req.body;
+    const lastUserMessage = [...(messages ?? [])].reverse().find((message) => message.role === "user");
+    const userQuery = lastUserMessage?.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join(" ") ?? "";
+    console.info("[Chat] Request", JSON.stringify({
+      requestId,
+      requestNumber,
+      method: req.method,
+      path: req.path,
+      receivedAt: new Date().toISOString(),
+      messageCount: messages?.length ?? 0,
+      userQuery,
+    }));
     const modelMessages = await convertToModelMessages(messages);
 
     // Randomly select the starting API key for every request.
@@ -129,7 +153,26 @@ app.post("/api/chat", async (req: Request, res: Response) => {
               messages: modelMessages,
               tools,
               system: SYSTEM_PROMPT,
+              temperature,
               stopWhen: stepCountIs(5),
+              onFinish: ({ usage, steps, finishReason, response }) => {
+                console.info("[Chat] Completed", JSON.stringify({
+                  requestId,
+                  requestNumber,
+                  provider: c.name,
+                  model: response.modelId,
+                  temperature,
+                  finishReason,
+                  usage,
+                  stepCount: steps.length,
+                  toolCalls: steps.flatMap((step) => step.toolCalls.map((call) => ({
+                    toolName: call.toolName,
+                    input: call.input,
+                  }))),
+                  responseId: response.id,
+                  timestamp: new Date().toISOString(),
+                }));
+              },
               onError: ({ error }) => {
                 lastError =
                   error instanceof Error

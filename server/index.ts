@@ -1,4 +1,4 @@
-import "dotenv/config"; 
+import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
 import multer from "multer";
@@ -26,32 +26,25 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.use(cors());
 app.use(express.json());
 
-const openrouter = createOpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
+const openrouterKeys = (process.env.OPENROUTER_API_KEY || "")
+  .split(",")
+  .map((key) => key.trim())
+  .filter(Boolean);
 
 const ollama = createOllama({
-  baseURL: process.env.OLLAMA_BASE_URL ,
+  baseURL: process.env.OLLAMA_BASE_URL,
   headers: {
     Authorization: `Bearer ${process.env.OLLAMA_API_KEY || ""}`,
   },
 });
 
-const primaryModelName = process.env.MODEL || "openrouter/free";
-const fallbackModelName = process.env.OLLAMA_MODEL || "gpt-oss:120b";
+const primaryModelName = process.env.MODEL;
+const fallbackModelName = process.env.OLLAMA_MODEL;
 
-type Candidate = { name: string; model: () => LanguageModel };
-
-const candidates: Candidate[] = [
-  {
-    name: `OpenRouter (${primaryModelName})`,
-    model: () => openrouter(primaryModelName),
-  },
-  {
-    name: `Ollama Cloud (${fallbackModelName})`,
-    model: () => ollama(fallbackModelName),
-  },
-];
+type Candidate = {
+  name: string;
+  model: () => LanguageModel;
+};
 
 const tools = {
   searchKnowledgeBase: tool({
@@ -70,7 +63,10 @@ const tools = {
         }
 
         return results
-          .map((result: any, index: number) => `[${index + 1}] ${result.content}`)
+          .map(
+            (result: any, index: number) =>
+              `[${index + 1}] ${result.content}`
+          )
           .join("\n\n");
       } catch (error) {
         console.error("Search error:", error);
@@ -92,13 +88,39 @@ app.post("/api/chat", async (req: Request, res: Response) => {
     const { messages }: { messages: UIMessage[] } = req.body;
     const modelMessages = await convertToModelMessages(messages);
 
+    // Randomly select the starting API key for every request.
+    const startIndex =
+      openrouterKeys.length > 0
+        ? Math.floor(Math.random() * openrouterKeys.length)
+        : 0;
+
+    // Try remaining keys in order, wrapping around to the beginning.
+    const orderedKeys = openrouterKeys.length
+      ? [
+        ...openrouterKeys.slice(startIndex),
+        ...openrouterKeys.slice(0, startIndex),
+      ]
+      : [];
+
+    const candidates: Candidate[] = [
+      ...orderedKeys.map((key) => ({
+        name: `OpenRouter key ${openrouterKeys.indexOf(key) + 1}`,
+        model: () =>
+          createOpenRouter({ apiKey: key })(primaryModelName!),
+      })),
+      {
+        name: `Ollama Cloud (${fallbackModelName})`,
+        model: () => ollama(fallbackModelName!),
+      },
+    ];
+
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
         for (const c of candidates) {
           console.log(`[Chat] Trying provider ${c.name}...`);
 
           let lastError = "";
-          let committed = false; 
+          let committed = false;
           const buffer: UIMessageChunk[] = [];
 
           try {
@@ -110,7 +132,9 @@ app.post("/api/chat", async (req: Request, res: Response) => {
               stopWhen: stepCountIs(5),
               onError: ({ error }) => {
                 lastError =
-                  error instanceof Error ? error.message : String(error);
+                  error instanceof Error
+                    ? error.message
+                    : String(error);
               },
             });
 
@@ -119,39 +143,60 @@ app.post("/api/chat", async (req: Request, res: Response) => {
             try {
               while (true) {
                 const { done, value } = await reader.read();
+
                 if (done) break;
 
+                // Once output starts, forward subsequent chunks directly.
                 if (committed) {
                   writer.write(value);
                   continue;
                 }
 
-                if (value.type === "error") break;
+                // An error before output starts allows fallback.
+                if (value.type === "error") {
+                  lastError = lastError || "Stream returned an error";
+                  break;
+                }
 
                 buffer.push(value);
 
-                if (value.type !== "start" && value.type !== "start-step") {
+                // Wait until actual output begins before committing.
+                if (
+                  value.type !== "start" &&
+                  value.type !== "start-step"
+                ) {
                   committed = true;
                   buffer.forEach((chunk) => writer.write(chunk));
                 }
               }
             } finally {
-              if (!committed) await reader.cancel().catch(() => {});
+              if (!committed) {
+                await reader.cancel().catch(() => { });
+              }
             }
 
-            if (committed) return; 
+            // Do not switch providers after output has started.
+            if (committed) return;
 
             console.warn(
-              `[Chat] ${c.name} failed: ${lastError || "no response"}. Switching to next provider...`
+              `[Chat] ${c.name} failed: ${lastError || "no response"
+              }. Switching to next provider...`
             );
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
+            const msg =
+              err instanceof Error ? err.message : String(err);
+
             if (committed) {
-              console.error(`[Chat] ${c.name} broke mid-stream: ${msg}`);
+              console.error(
+                `[Chat] ${c.name} broke mid-stream: ${msg}`
+              );
+
               writer.write({
                 type: "error",
-                errorText: "The response was interrupted. Please try again.",
+                errorText:
+                  "The response was interrupted. Please try again.",
               });
+
               return;
             }
 
@@ -163,7 +208,8 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 
         writer.write({
           type: "error",
-          errorText: "All models are failed right now. Please try again later.",
+          errorText:
+            "All models are failed right now. Please try again later.",
         });
       },
     });
@@ -173,7 +219,9 @@ app.post("/api/chat", async (req: Request, res: Response) => {
     console.error("Error streaming chat completion:", error);
 
     if (!res.headersSent) {
-      res.status(500).json({ error: "Failed to stream chat completion" });
+      res.status(500).json({
+        error: "Failed to stream chat completion",
+      });
     }
   }
 });
@@ -194,6 +242,7 @@ app.post(
       return res.json(result);
     } catch (error) {
       console.error("PDF upload error:", error);
+
       return res.status(500).json({
         success: false,
         error: "Failed to process PDF",
@@ -201,7 +250,6 @@ app.post(
     }
   }
 );
-
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

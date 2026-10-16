@@ -183,7 +183,7 @@ export default function RAGChatBot({ chatId, savedMessages, onMessagesChange }: 
           )}
         </ConversationContent>
       </Conversation>
-
+            
       <div className="max-w-3xl w-full mx-auto relative">
         <PromptInput
           className="chat-prompt-form"
@@ -196,8 +196,9 @@ export default function RAGChatBot({ chatId, savedMessages, onMessagesChange }: 
               onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
               placeholder="Message Agent AI..."
             />
-
+            
             <div className="chat-prompt-controls">
+            
               <PromptInputTools />
 
               <div className="chat-prompt-actions">

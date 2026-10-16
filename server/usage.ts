@@ -4,13 +4,11 @@ import crypto from "node:crypto";
 
 const FILE = process.env.USAGE_FILE || path.resolve("usage-data.json");
 
-// Per-key limits (OpenRouter free tier: 20/min, 50/day)
 export const LIMIT_PER_MINUTE = Number(process.env.OPENROUTER_RPM || 20);
 export const LIMIT_PER_DAY = Number(process.env.OPENROUTER_RPD || 50);
 
 const MINUTE_MS = 60_000;
 
-// keyId -> list of request timestamps (ms)
 type Store = Record<string, number[]>;
 
 let store: Store = {};
@@ -20,7 +18,6 @@ try {
   store = {};
 }
 
-// Never store raw API keys; use a short hash as the id
 export function keyId(apiKey: string): string {
   return crypto.createHash("sha256").update(apiKey).digest("hex").slice(0, 8);
 }
@@ -54,12 +51,25 @@ export function recordRequest(id: string) {
   save();
 }
 
+// Aaj ka count `count` ke barabar kar deta hai (purani requests ke liye)
+export function seedUsage(id: string, count: number) {
+  const now = Date.now();
+  const dayStart = startOfUtcDay(now);
+  const current = (store[id] || []).filter((t) => t >= dayStart).length;
+  const missing = Math.max(0, count - current);
+
+  // UTC din ki shuruaat par rakhe jate hain, isliye per-minute window par asar nahi
+  const placeholders = Array.from({ length: missing }, () => dayStart);
+  store[id] = [...placeholders, ...(store[id] || [])];
+  save();
+}
+
 export type KeyUsage = {
   usedMinute: number;
   usedDay: number;
   remainingMinute: number;
   remainingDay: number;
-  available: number; // how many requests you can still send right now
+  available: number; // abhi kitni requests bhej sakte ho
   minuteResetsInSec: number;
   dayResetsInSec: number;
 };
@@ -82,30 +92,46 @@ export function getKeyUsage(id: string): KeyUsage {
     remainingDay,
     available: Math.min(remainingMinute, remainingDay),
     minuteResetsInSec: inMinute.length
-      ? Math.ceil((inMinute[0] + MINUTE_MS - now) / 1000)
+      ? Math.ceil((Math.min(...inMinute) + MINUTE_MS - now) / 1000)
       : 0,
     dayResetsInSec: Math.ceil((dayStart + 24 * 60 * 60 * 1000 - now) / 1000),
   };
 }
 
-export function getSummary(keys: string[]) {
-  const perKey = keys.map((k, i) => ({
-    key: `OpenRouter key ${i + 1}`,
-    id: keyId(k),
-    limits: { perMinute: LIMIT_PER_MINUTE, perDay: LIMIT_PER_DAY },
-    ...getKeyUsage(keyId(k)),
-  }));
+export function getSummary(apiKeys: string[]) {
+  const usageByKey = apiKeys.map((apiKey, index) => {
+    const hashedKeyId = keyId(apiKey);
+
+    return {
+      key: `OpenRouter key ${index + 1}`,
+      id: hashedKeyId,
+      limits: { perMinute: LIMIT_PER_MINUTE, perDay: LIMIT_PER_DAY },
+      ...getKeyUsage(hashedKeyId),
+    };
+  });
 
   return {
-    keyCount: keys.length,
+    keyCount: apiKeys.length,
     totalLimits: {
-      perMinute: LIMIT_PER_MINUTE * keys.length,
-      perDay: LIMIT_PER_DAY * keys.length,
+      perMinute: LIMIT_PER_MINUTE * apiKeys.length,
+      perDay: LIMIT_PER_DAY * apiKeys.length,
     },
-    totalUsedMinute: perKey.reduce((s, k) => s + k.usedMinute, 0),
-    totalUsedDay: perKey.reduce((s, k) => s + k.usedDay, 0),
-    totalRemainingMinute: perKey.reduce((s, k) => s + k.remainingMinute, 0),
-    totalRemainingDay: perKey.reduce((s, k) => s + k.remainingDay, 0),
-    keys: perKey,
+    totalUsedMinute: usageByKey.reduce(
+      (total, keyUsage) => total + keyUsage.usedMinute,
+      0,
+    ),
+    totalUsedDay: usageByKey.reduce(
+      (total, keyUsage) => total + keyUsage.usedDay,
+      0,
+    ),
+    totalRemainingMinute: usageByKey.reduce(
+      (total, keyUsage) => total + keyUsage.remainingMinute,
+      0,
+    ),
+    totalRemainingDay: usageByKey.reduce(
+      (total, keyUsage) => total + keyUsage.remainingDay,
+      0,
+    ),
+    keys: usageByKey,
   };
 }

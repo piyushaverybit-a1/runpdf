@@ -9,7 +9,7 @@ import { createOllama } from "ollama-ai-provider-v2";
 import { z } from "zod";
 import { searchDocuments } from "./search.js";
 import { processPdfFile } from "./process-pdf.js";
-import { checkInputGuardrail, checkOutputGuardrail } from "./guardrails.js";
+import { checkOutputGuardrail } from "./guardrails.js";
 import { keyId,recordRequest,seedUsage,getKeyUsage,getSummary,LIMIT_PER_DAY} from "./usage.js";
 
 const app = express();
@@ -151,21 +151,6 @@ app.post("/api/chat", async (req: Request, res: Response) => {
         model: () => ollama(fallbackModelName!),
       },
     ];
-
-    // Check the user's request before starting the main assistant stream.
-    console.log("Input guardrail started");
-
-    const inputDecision = await checkInputGuardrail(
-      candidates[0].model(),
-      userQuery,
-    );
-    console.log("Input guardrail completed");
-    if (!inputDecision.allowed) {
-      return res.status(400).json({
-        error: "Your request was blocked by the security guardrail.",
-        reason: inputDecision.reason,
-      });
-    }
 
     // Keep retrieval context isolated to this HTTP request. The tool is
     // created here because a global tool would mix context across requests.

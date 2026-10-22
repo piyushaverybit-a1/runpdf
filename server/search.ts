@@ -6,7 +6,6 @@ import { sql, desc, cosineDistance } from "drizzle-orm";
 export async function searchDocuments(
   query: string,
   limit: number = 5,
-  // threshold: number = 0.5
 ) {
   const embedding = await generateEmbedding(query);
 

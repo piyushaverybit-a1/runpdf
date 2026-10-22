@@ -203,15 +203,7 @@ export default function RAGChatBot({ chatId, savedMessages, onMessagesChange }: 
       <div className="max-w-3xl w-full mx-auto relative">
         {isGenerating && (
           <div className="flex justify-center mb-2.5">
-            <button
-              type="button"
-              onClick={stop}
-              className="chat-floating-stop-button"
-              title="Stop generating"
-            >
-              <Square className="h-3 w-3 fill-rose-500 text-rose-500" />
-              <span>Stop generating</span>
-            </button>
+           
           </div>
         )}
 

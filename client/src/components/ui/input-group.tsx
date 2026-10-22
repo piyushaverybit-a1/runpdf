@@ -7,7 +7,10 @@ export const InputGroup = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("relative flex flex-col w-full rounded-2xl bg-secondary/80 border border-border/70 focus-within:border-foreground/30 focus-within:ring-1 focus-within:ring-foreground/20", className)}
+    className={cn(
+      "chat-prompt-card relative flex flex-col w-full rounded-2xl sm:rounded-3xl bg-white border border-border shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05),0_2px_6px_-1px_rgba(0,0,0,0.03)] focus-within:border-[#10a37f] focus-within:ring-2 focus-within:ring-[#10a37f]/15 transition-all duration-150",
+      className
+    )}
     {...props}
   />
 ));

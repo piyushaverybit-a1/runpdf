@@ -2,20 +2,35 @@ import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
 import multer from "multer";
-import { streamText, UIMessage, UIMessageChunk,LanguageModel, convertToModelMessages,
-tool,stepCountIs, createUIMessageStream, pipeUIMessageStreamToResponse, wrapLanguageModel,} from "ai";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  LanguageModel,
+  pipeUIMessageStreamToResponse,
+  stepCountIs,
+  streamText,
+  tool,
+  UIMessage,
+  UIMessageChunk,
+  wrapLanguageModel,
+} from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 import { z } from "zod";
 import { searchDocuments } from "./search.js";
 import { processPdfFile } from "./process-pdf.js";
-import { checkOutputGuardrail } from "./guardrails.js";
-import { keyId,recordRequest,seedUsage,getKeyUsage,getSummary,LIMIT_PER_DAY} from "./usage.js";
+import {
+  getKeyUsage,
+  getSummary,
+  keyId,
+  LIMIT_PER_DAY,
+  recordRequest,
+  seedUsage,
+} from "./usage.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const upload = multer({ storage: multer.memoryStorage() });
-let chatRequestCount = 0;
 let keyCounter = 0;
 const temperature = 0;
 
@@ -44,26 +59,24 @@ type Candidate = {
   model: () => LanguageModel;
 };
 
-// Har real call ko file mein count karta hai
+// Record each model call so the app can track how much each API key is used.
 function withUsageTracking(
   model: LanguageModel,
   id: string,
-  label: string
 ): LanguageModel {
-  const    log = () => {
+  const recordModelCall = () => {
     recordRequest(id);
-    const u = getKeyUsage(id);
   };
 
   return wrapLanguageModel({
     model: model as any,
     middleware: {
       wrapStream: async ({ doStream }) => {
-        log();
+        recordModelCall();
         return doStream();
       },
       wrapGenerate: async ({ doGenerate }) => {
-        log();
+        recordModelCall();
         return doGenerate();
       },
     },
@@ -94,21 +107,13 @@ app.post("/api/usage/seed", (req: Request, res: Response) => {
 });
 
 app.post("/api/chat", async (req: Request, res: Response) => {
-  // const requestNumber = ++chatRequestCount;
-  // const requestId = `${Date.now()}-${requestNumber}`;
   try {
     const { messages }: { messages: UIMessage[] } = req.body;
-    const lastUserMessage = [...(messages ?? [])]
-      .reverse()
-      .find((message) => message.role === "user");
-    const userQuery =
-      lastUserMessage?.parts
-        .filter((part) => part.type === "text")
-        .map((part) => (part as any).text)
-        .join(" ") ?? "";
-        
+
+    // Convert the chat history into the format the AI model expects.
     const modelMessages = await convertToModelMessages(messages);
 
+    // Find API keys that still have request quota available.
     const allKeys = openrouterKeys.map((key, i) => ({
       key,
       id: keyId(key),
@@ -127,14 +132,15 @@ app.post("/api/chat", async (req: Request, res: Response) => {
       return true;
     });
 
-    // Bachi hui keys mein round-robin
-    const total = availableKeys.length;
-    const startIndex = total > 0 ? keyCounter++ % total : 0;
-
-    const orderedKeys = Array.from({ length: total },
-      (_, i) => availableKeys[(startIndex + i) % total]
+    // Rotate the starting key so requests are shared across available keys.
+    const availableKeyCount = availableKeys.length;
+    const startIndex = availableKeyCount > 0 ? keyCounter++ % availableKeyCount : 0;
+    const orderedKeys = Array.from(
+      { length: availableKeyCount },
+      (_, index) => availableKeys[(startIndex + index) % availableKeyCount],
     );
 
+    // Try each available OpenRouter key, then try the Ollama backup.
     const candidates: Candidate[] = [
       ...orderedKeys.map(({ key, id, label }) => ({
         name: label,
@@ -143,7 +149,6 @@ app.post("/api/chat", async (req: Request, res: Response) => {
           withUsageTracking(
             createOpenRouter({ apiKey: key })(primaryModelName!),
             id,
-            label
           ),
       })),
       {
@@ -152,14 +157,13 @@ app.post("/api/chat", async (req: Request, res: Response) => {
       },
     ];
 
-    // Keep retrieval context isolated to this HTTP request. The tool is
-    // created here because a global tool would mix context across requests.
-    let retrievedContext = "";
     const requestTools = {
       searchKnowledgeBase: tool({
         description: "Search the knowledge base for relevant information.",
         inputSchema: z.object({
-          query: z.string().describe("The search query to find relevant documents."),
+          query: z
+            .string()
+            .describe("The search query to find relevant documents."),
         }),
         execute: async ({ query }) => {
           try {
@@ -167,10 +171,10 @@ app.post("/api/chat", async (req: Request, res: Response) => {
             if (results.length === 0) {
               return "No relevant information found in the knowledge base.";
             }
+
             const context = results
               .map((result: any, index: number) => `[${index + 1}] ${result.content}`)
               .join("\n\n");
-            retrievedContext += `${retrievedContext ? "\n\n" : ""}${context}`;
             return context;
           } catch (error) {
             console.error("Search error:", error);
@@ -182,8 +186,9 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
-        for (const c of candidates) {
-          console.log(`[Chat] Trying provider ${c.name}...`);
+        // Try providers one by one until one returns a usable answer.
+        for (const candidate of candidates) {
+          console.log(`[Chat] Trying provider ${candidate.name}...`);
 
           let lastError = "";
           let committed = false;
@@ -191,14 +196,12 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 
           try {
             const result = streamText({
-              model: c.model(),
+              model: candidate.model(),
               messages: modelMessages,
               tools: requestTools,
               system: SYSTEM_PROMPT,
               temperature,
-              stopWhen: stepCountIs(0),
-              onFinish: ({ usage, steps, finishReason, response }) => {
-              },
+              stopWhen: stepCountIs(3),
               onError: ({ error }) => {
                 lastError =
                   error instanceof Error
@@ -208,7 +211,6 @@ app.post("/api/chat", async (req: Request, res: Response) => {
             });
 
             const reader = result.toUIMessageStream().getReader();
-            let answerText = "";
 
             try {
               while (true) {
@@ -225,9 +227,6 @@ app.post("/api/chat", async (req: Request, res: Response) => {
                 }
 
                 buffer.push(value);
-                if (value.type === "text-delta") {
-                  answerText += value.delta;
-                }
               }
             } finally {
               if (!committed) {
@@ -238,41 +237,19 @@ app.post("/api/chat", async (req: Request, res: Response) => {
             if (lastError) {
               // A provider error before anything is sent is safe to retry.
             } else if (buffer.length > 0) {
-              const outputDecision = await checkOutputGuardrail(
-                c.model(),
-                userQuery,
-                answerText,
-                retrievedContext,
-              );
-
-              if (!outputDecision.safe || !outputDecision.supported) {
-                console.warn("[Guardrail] Answer blocked:", outputDecision.reason);
-                const messageId = crypto.randomUUID();
-                const textId = crypto.randomUUID();
-                const refusal =
-                  "I couldn't verify that answer safely against the available information. Please rephrase your question or provide more relevant document content.";
-                writer.write({ type: "start", messageId });
-                writer.write({ type: "text-start", id: textId });
-                writer.write({ type: "text-delta", id: textId, delta: refusal });
-                writer.write({ type: "text-end", id: textId });
-                writer.write({ type: "finish" });
-                return;
-              }
-
-              console.log(`[Chat] Using ${c.name}`);
+              console.log(`[Chat] Using ${candidate.name}`);
               buffer.forEach((chunk) => writer.write(chunk));
               committed = true;
               return;
             }
 
-            // Daily limit ka error aaya to key ko "full" mark karo
-            // (pehli baar lastError log mein dekh ke regex adjust kar lena)
-            if (c.id && /per-day|daily/i.test(lastError)) {
-              seedUsage(c.id, LIMIT_PER_DAY);
+            // Mark a key as out of daily quota when the provider reports its limit.
+            if (candidate.id && /per-day|daily/i.test(lastError)) {
+              seedUsage(candidate.id, LIMIT_PER_DAY);
             }
 
             console.warn(
-              `[Chat] ${c.name} failed: ${
+              `[Chat] ${candidate.name} failed: ${
                 lastError || "no response"
               }. Switching to next provider...`
             );
@@ -282,7 +259,7 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 
             if (committed) {
               console.error(
-                `[Chat] ${c.name} broke mid-stream: ${msg}`
+                `[Chat] ${candidate.name} broke mid-stream: ${msg}`
               );
 
               writer.write({
@@ -295,7 +272,7 @@ app.post("/api/chat", async (req: Request, res: Response) => {
             }
 
             console.warn(
-              `[Chat] ${c.name} threw: ${msg}. Switching to next provider...`
+              `[Chat] ${candidate.name} threw: ${msg}. Switching to next provider...`
             );
           }
         }

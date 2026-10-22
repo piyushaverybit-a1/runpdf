@@ -42,6 +42,22 @@ const App = () => {
     })
   }, [])
 
+  const handleDeleteChat = useCallback(
+    (chatIdToDelete: string) => {
+      setChats((currentChats) =>
+        currentChats.filter((chat) => chat.id !== chatIdToDelete),
+      );
+      setActiveChatId((currentActive) => {
+        if (currentActive === chatIdToDelete) {
+          const remaining = chats.filter((chat) => chat.id !== chatIdToDelete);
+          return remaining[0]?.id ?? crypto.randomUUID();
+        }
+        return currentActive;
+      });
+    },
+    [chats],
+  );
+
   return (
     <div>
       <Navbar />
@@ -51,6 +67,7 @@ const App = () => {
           activeChatId={activeChatId}
           onNewChat={() => setActiveChatId(crypto.randomUUID())}
           onSelectChat={setActiveChatId}
+          onDeleteChat={handleDeleteChat}
         />
         <main className="app-main">
           <Home
